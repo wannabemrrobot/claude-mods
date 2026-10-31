@@ -8,6 +8,14 @@ A directory of mods for [Claude Code](https://claude.com/claude-code). Each fold
 | --- | --- |
 | [usagebar](./usagebar) | Two rows under the prompt: context left until auto-compact, tokens in/out/total, cache share and cost, plus every rate-limit window with its reset. The current model and effort sit at the right end of the line above. |
 
+### usagebar
+
+![usagebar under the prompt: context bar, tokens and cost, 5-hour and weekly limits, model and effort](usagebar/screenshots/hero.svg)
+
+![Near the limits: bars turn amber and red](usagebar/screenshots/pressure.svg)
+
+More screenshots in the [usagebar README](./usagebar#screenshots).
+
 ## Install a mod
 
 At the prompt of a Claude Code terminal session:
@@ -36,6 +44,7 @@ In the desktop app, where `/plugin` doesn't run: click **+** next to the prompt 
   hooks/register.tsx              the mod itself
   types/index.d.ts                its state contract, where it keeps state
   tests/                          `claude plugin test <mod>`
+  screenshots/                    images for the mod's README
 ```
 
 ## Adding a mod
