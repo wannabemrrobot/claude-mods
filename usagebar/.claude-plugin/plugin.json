@@ -1,0 +1,11 @@
+{
+  "name": "usagebar",
+  "version": "0.1.0",
+  "description": "Two rows under the prompt: context left until auto-compact with tokens in/out/total and cost, and the 5-hour and weekly rate-limit windows with their resets.",
+  "types": "./types/index.d.ts",
+  "author": {
+    "name": "wannabemrrobot"
+  },
+  "repository": "https://github.com/wannabemrrobot/claude-mods",
+  "license": "MIT"
+}

@@ -1,0 +1,14 @@
+{
+  "name": "claude-mods",
+  "owner": { "name": "wannabemrrobot" },
+  "metadata": {
+    "description": "A directory of mods for Claude Code: small hooks modules that change how Claude Code looks and behaves."
+  },
+  "plugins": [
+    {
+      "name": "usagebar",
+      "source": "./usagebar",
+      "description": "Context left until auto-compact, tokens and cost, rate-limit windows with resets, and the current model and effort, drawn under the prompt."
+    }
+  ]
+}
