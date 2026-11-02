@@ -6,7 +6,7 @@ A directory of mods for [Claude Code](https://claude.com/claude-code). Each fold
 
 | Mod | What it does |
 | --- | --- |
-| [usagebar](./usagebar) | Two rows under the prompt: context left until auto-compact, tokens in/out/total, cache share and cost, plus every rate-limit window with its reset. The current model and effort sit at the right end of the line above. |
+| [usagebar](./usagebar) | Two rows under the prompt: context left until auto-compact, tokens in/out/total, cache share and cost, plus every rate-limit window with its reset. Optional usage caps make the agent wrap up and hand off as it nears a 5-hour or weekly limit you set. The current model and effort sit at the right end of the line above. |
 
 ### usagebar
 

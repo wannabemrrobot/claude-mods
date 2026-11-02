@@ -1,11 +1,47 @@
 {
   "name": "usagebar",
-  "version": "0.1.0",
-  "description": "Two rows under the prompt: context left until auto-compact with tokens in/out/total and cost, and the 5-hour and weekly rate-limit windows with their resets.",
+  "version": "0.2.0",
+  "description": "Two rows under the prompt: context left until auto-compact with tokens in/out/total and cost, and the 5-hour and weekly rate-limit windows with their resets. Optional usage caps: as usage nears a cap you set, the agent is told to wrap up and hand off.",
   "types": "./types/index.d.ts",
   "author": {
     "name": "wannabemrrobot"
   },
   "repository": "https://github.com/wannabemrrobot/claude-mods",
-  "license": "MIT"
+  "license": "MIT",
+  "userConfig": {
+    "cap5h": {
+      "type": "number",
+      "title": "5-hour cap (%)",
+      "description": "Wrap the agent up at this share of the 5-hour window. 0: no cap.",
+      "default": 0
+    },
+    "capWeek": {
+      "type": "number",
+      "title": "Weekly cap (%)",
+      "description": "Wrap the agent up at this share of the weekly window. 0: no cap.",
+      "default": 0
+    },
+    "warnAt": {
+      "type": "number",
+      "title": "Heads-up (points before the cap)",
+      "description": "How far below a cap the agent is first told to aim for a stopping point.",
+      "default": 10
+    },
+    "wrapAt": {
+      "type": "number",
+      "title": "Wrap-up (points before the cap)",
+      "description": "How far below a cap the agent is told to wrap up and write a handoff.",
+      "default": 3
+    },
+    "onCap": {
+      "type": "string",
+      "title": "At the cap",
+      "description": "wind-down: refuse tool calls so the agent writes its handoff and stops. warn-only: only tell it.",
+      "default": "wind-down",
+      "options": [
+        "wind-down",
+        "warn-only"
+      ]
+    }
+  }
 }

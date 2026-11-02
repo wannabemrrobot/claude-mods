@@ -1,6 +1,8 @@
 // Pure logic: no `$`, so the tests can drive it directly.
 
 import type { BarContext, BarLimit, BarSeen, BarSession, BarTokens } from '../types'
+import { capCell, capFor, capLabel, stageOf, withCapMark } from './cap'
+import type { Caps } from './cap'
 
 export const ZERO: BarTokens = { input: 0, cacheRead: 0, cacheWrite: 0, output: 0, requests: 0 }
 export const EMPTY_CTX: BarContext = {
@@ -23,6 +25,10 @@ export type BarModel = {
   cwd: string | null
   /** Claude's config folder (CLAUDE_CONFIG_DIR, else ~/.claude); drawn at the right end of the limits row. */
   home: string | null
+  /** The usage caps; absent or none set, the limits row draws as it always has. */
+  caps?: Caps
+  /** `/usagecap override` holds: past the cap, nothing is refused. */
+  isOverridden?: boolean
 }
 
 // ---------------------------------------------------------------- tokens
@@ -406,16 +412,23 @@ function limitBars(m: BarModel, cols: number): Part[] {
     const frac = l.percentUsed / 100
     const color = levelColor(frac)
     const b = bar(frac, width)
+    const cap = m.caps ? capFor(l.kind, m.caps) : null
+    const marked = withCapMark(b.filled, b.empty, capCell(cap, width))
     segs.push({
       prio: 0,
       sep,
       parts: [
         { text: head, dim: true },
-        { text: b.filled, color },
-        { text: b.empty, dim: true },
+        { text: marked.filled, color },
+        { text: marked.before, dim: true },
+        ...(marked.mark ? [{ text: marked.mark, color: 'warning' }, { text: marked.after, dim: true }] : []),
         { text: ` ${Math.round(l.percentUsed)}%`, color, bold: frac >= 0.85 },
       ],
     })
+    if (cap !== null && m.caps) {
+      const stage = stageOf(l.percentUsed, cap, m.caps)
+      segs.push({ prio: stage === 'ok' ? 2 : 0, parts: capLabel(stage, cap, m.caps.mode, m.isOverridden === true) })
+    }
     if (l.resetsAt !== null) {
       segs.push({
         prio: 1,

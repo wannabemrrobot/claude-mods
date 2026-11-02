@@ -24,6 +24,9 @@ import {
   toLimits,
 } from './lib'
 import type { BarModel, Part, ShimmerFrames } from './lib'
+import { CAP_HELP, NO_CAPS, capDeny, capNote, capsFrom, describeCaps, parseCapCommand, worstStage } from './cap'
+import type { CapReading, Caps } from './cap'
+import type { BarLimit } from '../types'
 
 type Engine = EngineInterface
 
@@ -52,6 +55,98 @@ let ticker: Timer | null = null
 let homeCache: string | null = null
 /** Cells the engine's mode labels take at the footer's right end, as SessionMode last drew them. */
 let modesWidth = 0
+
+// ------------------------------------------------------------ the usage cap
+// Kept in plain variables, so the check on each tool call reads no state:
+// the limits as the last reading left them and the caps as last loaded.
+
+const CAP_SETTINGS = 'cap:settings'
+const CAP_OVERRIDE = 'cap:override'
+let pluginOptions: Readonly<Record<string, unknown>> = {}
+let capsCache: Caps = NO_CAPS
+let limitsCache: readonly BarLimit[] = []
+/** `/usagecap override`: past the cap until this time (the window's reset); null: no override. */
+let overrideUntil: number | null = null
+/** The last note each loop (main, or a subagent's id) was given, so each stage is said once. */
+const notesSent = new Map<string, string>()
+let toastedFor: string | null = null
+
+const hasCaps = (c: Caps) => c.fiveHour !== null || c.week !== null
+const isOverridden = (now: number) => overrideUntil !== null && now < overrideUntil
+
+async function loadCaps($: Engine) {
+  const [saved, override] = await Promise.all([$.store.get(CAP_SETTINGS), $.store.get(CAP_OVERRIDE)])
+  capsCache = capsFrom(pluginOptions, saved)
+  overrideUntil = typeof override === 'number' && Number.isFinite(override) ? override : null
+}
+
+async function capReading($: Engine): Promise<{ r: CapReading | null; now: number }> {
+  if (!hasCaps(capsCache) || limitsCache.length === 0) return { r: null, now: 0 }
+  const now = await $.clock.now()
+  return { r: worstStage(limitsCache, capsCache, now), now }
+}
+
+/** The note a loop should read now, or null when it already has it. */
+function noteOnce(loop: string, r: CapReading, over: boolean): string | null {
+  const key = `${r.kind}|${r.resetsAt}|${r.stage}|${over}|${capsCache.mode}`
+  if (notesSent.get(loop) === key) return null
+  notesSent.delete(loop)
+  notesSent.set(loop, key)
+  while (notesSent.size > 64) notesSent.delete(notesSent.keys().next().value as string)
+  return capNote(r, capsCache.mode, over)
+}
+
+/** One toast when a window first reaches its cap. */
+async function toastAtCap($: Engine) {
+  const { r, now } = await capReading($)
+  if (!r || r.stage !== 'cap') return
+  const key = `${r.kind}|${r.resetsAt}`
+  if (toastedFor === key) return
+  toastedFor = key
+  const name = r.kind === 'five_hour' ? '5h' : 'weekly'
+  const tail = isOverridden(now) ? 'override on' : capsCache.mode === 'warn-only' ? 'the agent was told to stop' : 'tool calls paused; /usagecap override to continue'
+  $.ui.toast(`usagebar: ${name} usage ${r.percent}% hit your ${r.cap}% cap: ${tail}`)
+}
+
+async function runCapCommand($: Engine, args: string): Promise<string> {
+  const cmd = parseCapCommand(args)
+  const saved = async () => {
+    const raw = await $.store.get(CAP_SETTINGS)
+    return raw !== null && typeof raw === 'object' && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {}
+  }
+  switch (cmd.kind) {
+    case 'show':
+      break
+    case 'help':
+      return cmd.error ? `${cmd.error}\n\n${CAP_HELP}` : CAP_HELP
+    case 'set':
+      await $.store.set(CAP_SETTINGS, { ...(await saved()), ...cmd.patch })
+      break
+    case 'off':
+      await $.store.set(CAP_SETTINGS, { ...(await saved()), cap5h: null, capWeek: null })
+      break
+    case 'reset':
+      await $.store.delete(CAP_SETTINGS)
+      await $.store.delete(CAP_OVERRIDE)
+      break
+    case 'override': {
+      const { r, now } = await capReading($)
+      if (!r || r.stage !== 'cap') return `Nothing to override: no window is at its cap. ${describeCaps(capsCache)}`
+      // Until the window resets; with no reset reported, for the next 5 hours.
+      const until = r.resetsAt ?? now + 5 * 3_600_000
+      await $.store.set(CAP_OVERRIDE, until)
+      await loadCaps($)
+      $.ui.invalidate('ui.render')
+      return `Override on: tool calls go through past the cap until the window resets. ${describeCaps(capsCache)}`
+    }
+  }
+  await loadCaps($)
+  notesSent.clear()
+  toastedFor = null
+  $.ui.invalidate('ui.render')
+  const over = overrideUntil !== null && overrideUntil > (await $.clock.now()) ? ' · override on' : ''
+  return describeCaps(capsCache) + over
+}
 
 const debug = ($: Engine, text: string) => {
   try {
@@ -90,7 +185,9 @@ async function persistTokens($: Engine) {
 
 async function takeUsage($: Engine, u: Pick<SessionUsage, 'context' | 'rateLimits' | 'cost'>) {
   await update($, ctxA, c => ({ ...c, tokens: u.context.tokens ?? c.tokens, window: u.context.window }))
-  await update($, limitsA, () => toLimits(u.rateLimits))
+  const limits = toLimits(u.rateLimits)
+  limitsCache = limits
+  await update($, limitsA, () => limits)
   const cost = u.cost
   if (cost) await update($, sessionA, () => ({ costUsd: cost.usd }))
 }
@@ -171,7 +268,16 @@ async function readModel($: Engine): Promise<BarModel> {
     safe($, 'reading the cwd', () => $.session.cwd()),
     safe($, 'reading the config folder', () => claudeHome($)),
   ])
-  return { tokens, ctx, limits, session, now, cwd: cwd ?? null, home: home || null }
+  return {
+    tokens,
+    ctx,
+    limits,
+    session,
+    now,
+    cwd: cwd ?? null,
+    home: home || null,
+    ...(hasCaps(capsCache) ? { caps: capsCache, isOverridden: isOverridden(now) } : {}),
+  }
 }
 
 /** The model and effort as the last main request ran them, read again per draw against /model and /effort. */
@@ -245,9 +351,14 @@ const shimmerOf = (s: Shimmer | null): ShimmerFrames => ({
   ultracode: s?.ultracode ? s.frame : null,
 })
 
-export const register: Register = on => {
+export const register: Register = (on, options) => {
+  pluginOptions = options ?? {}
   on('session.start', async ($, e, next) => {
     sessionIdCache = null
+    await safe($, 'loading the caps', () => loadCaps($))
+    await safe($, 'adding /usagecap', () =>
+      $.command.register({ name: 'usagecap', description: 'Set a cap on the 5-hour or weekly usage: the agent wraps up as it nears it' }),
+    )
     await safe($, 'restoring counts', async () => {
       if ((await $.state.get(TOKENS)).version > 0) return
       const saved = sanitizeTokens(await $.store.get(`tokens:${await sessionId($)}`))
@@ -278,6 +389,7 @@ export const register: Register = on => {
       await takeUsage($, e)
       if (before.window !== null && before.window !== e.context.window) await refresh($, true)
     })
+    await safe($, 'checking the cap', () => toastAtCap($))
     return next(e)
   })
 
@@ -344,6 +456,55 @@ export const register: Register = on => {
     }
     return next(e)
   })
+
+  // ------------------------------------------------------------ the usage cap
+
+  on('command.run', { command: 'usagecap' }, async ($, e) => {
+    const text = await safe($, '/usagecap', () => runCapCommand($, e.args))
+    return { text: text ?? 'usagecap: something went wrong; see the debug log.' }
+  })
+
+  // Every tool call, the main loop's and each subagent's. Nearing a cap, the
+  // result carries a note only the model reads (once per stage per loop); at
+  // the cap, in wind-down mode, the call is refused with what to do instead.
+  // Anything going wrong here lets the call through untouched.
+  on('tool.call', async ($, e, next) => {
+    let r: CapReading | null = null
+    let over = false
+    try {
+      if (hasCaps(capsCache)) {
+        const reading = await capReading($)
+        r = reading.r
+        over = r !== null && isOverridden(reading.now)
+      }
+    } catch (err) {
+      debug($, `cap check failed: ${err instanceof Error ? err.message : String(err)}`)
+      r = null
+    }
+    if (r === null) return next(e)
+    if (r.stage === 'cap' && capsCache.mode === 'wind-down' && !over) {
+      const reading = r
+      noteOnce(e.agentId ?? 'main', reading, over)
+      await safe($, 'cap toast', () => toastAtCap($))
+      return { deny: capDeny(reading) }
+    }
+    const res = await next(e)
+    if (res.deny !== undefined) return res
+    const note = noteOnce(e.agentId ?? 'main', r, over)
+    return note ? { ...res, context: [...(res.context ?? []), note] } : res
+  }).catch(($, e, next) => next(e)) // fail open: a broken check never blocks a tool, nor runs one twice
+
+  // A prompt typed while near or past a cap carries the note too, so a new
+  // request is answered in that light (never dropped: the person decides).
+  on('prompt.submit', async ($, e, next) => {
+    if (e.command) return next(e)
+    const reading = await safe($, 'cap on prompt', () => capReading($))
+    const r = reading?.r
+    if (!reading || !r) return next(e)
+    const over = isOverridden(reading.now)
+    noteOnce('main', r, over)
+    return next({ ...e, context: [...(e.context ?? []), capNote(r, capsCache.mode, over)] })
+  }).catch(($, e, next) => next(e))
 
   on('ui.render', { component: 'PromptHint', surface: 'terminal' }, async ($, e, next) => {
     const engine = await next(e)

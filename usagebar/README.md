@@ -30,6 +30,36 @@ The limits come from the last API response, so they update after each reply and 
 
 ![usagebar in a 96-column terminal](screenshots/narrow.svg)
 
+## Usage caps
+
+Set a cap on the 5-hour or weekly window and the agent winds down as usage nears it, instead of running the window dry. With a 5-hour cap of 80%:
+
+| Usage | What the agent is told | The bar |
+| --- | --- | --- |
+| 70% (cap − 10) | heads-up: aim for a stopping point, start nothing large | `▏` marker, `cap 80%` in amber |
+| 77% (cap − 3) | wrap up: finish the step, leave things working, write a handoff (done, next, open), stop | `cap 80% · wrapping up` |
+| 80% | tool calls are refused with the same ask, so it writes the handoff and ends the turn | `paused at cap 80%`, one toast |
+
+- The notes reach the model beside a tool result (and beside a prompt you type), once per stage, for the main agent and each subagent. You never see them; they don't touch the system prompt, so the prompt cache stays warm.
+- No turn is ever cancelled, and no prompt is dropped. `warn-only` mode only tells the agent and never refuses a tool.
+- Usage is read from the last API reply, so a stage can begin about one request late; the wrap-up starts early to leave room.
+- The windows are your account's, so a cap counts every session on the account. Caps need a Pro or Max login: API-key sessions get no 5-hour or weekly figures.
+
+Set them in `/config` (`cap5h`, `capWeek`, `warnAt`, `wrapAt`, `onCap`; 0 is no cap), or from the prompt:
+
+```
+/usagecap                 show the caps
+/usagecap 5h 80           cap the 5-hour window at 80%
+/usagecap week 60         cap the weekly window at 60% (every weekly window)
+/usagecap 5h off          remove one cap; /usagecap off removes both
+/usagecap warn 10         heads-up this many points below a cap (wrap 3 for the wrap-up)
+/usagecap mode warn-only  only tell the agent (or: wind-down, the default)
+/usagecap override        keep going past the cap until that window resets
+/usagecap reset           drop what /usagecap set and go back to /config
+```
+
+What `/usagecap` sets is saved and holds in later sessions, over `/config`'s values.
+
 ## Install
 
 At the prompt of a Claude Code terminal session:
